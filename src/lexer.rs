@@ -1,26 +1,27 @@
 use std::str::Chars;
 
+#[derive(Clone, PartialEq, Eq)]
 pub enum Token {
-    EOF = -1,
-    // commands
-    Definition = -2,
-    Extern = -3,
-
-    // primary
-    Identifier = -4,
-    Number = -5,
+    EOF,
+    Definition,
+    Extern,
+    Identifier,
+    Number,
+    Punctuation,
 }
 
 pub struct Lexer<'a> {
-    identifier: String,
+    pub current_char: char,
+    pub identifier: String,
     numeric: String,
-    numeric_value: f64,
+    pub numeric_value: f64,
     getchar: Chars<'a>,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Lexer {
         Lexer {
+            current_char: 0 as char,
             identifier: String::new(),
             numeric: String::new(),
             numeric_value: 0.0,
@@ -39,6 +40,8 @@ impl<'a> Lexer<'a> {
 
         match c {
             Some(c) => {
+                self.current_char = c;
+
                 // Eat an identifier
                 if c.is_alphabetic() {
                     self.identifier.extend(self.getchar.clone().take_while(
@@ -69,7 +72,7 @@ impl<'a> Lexer<'a> {
                 } else if !self.numeric.is_empty() {
                     Token::Number
                 } else {
-                    unreachable!()
+                    Token::Punctuation
                 }
             }
             None => Token::EOF,
