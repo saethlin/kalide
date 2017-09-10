@@ -1,6 +1,7 @@
 use std::str::Chars;
+use std::iter::Peekable;
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     EOF,
     Definition,
@@ -15,7 +16,7 @@ pub struct Lexer<'a> {
     pub identifier: String,
     numeric: String,
     pub numeric_value: f64,
-    getchar: Chars<'a>,
+    getchar: Peekable<Chars<'a>>,
 }
 
 impl<'a> Lexer<'a> {
@@ -25,7 +26,7 @@ impl<'a> Lexer<'a> {
             identifier: String::new(),
             numeric: String::new(),
             numeric_value: 0.0,
-            getchar: input.chars(),
+            getchar: input.chars().peekable(),
         }
     }
 
@@ -44,18 +45,25 @@ impl<'a> Lexer<'a> {
 
                 // Eat an identifier
                 if c.is_alphabetic() {
+                    self.identifier.push(c);
                     self.identifier.extend(self.getchar.clone().take_while(
                         |c| c.is_alphabetic() || c.is_numeric(),
                     ));
-                    self.getchar.nth(self.identifier.len());
+                    if self.identifier.len() > 1 {
+                        self.getchar.nth(self.identifier.len() - 2);
+                    }
 
                 // Eat a numeric literal
                 } else if c.is_numeric() || c == '.' {
+                    self.numeric.push(c);
                     self.numeric.extend(self.getchar.clone().take_while(
                         |c| c.is_numeric() || *c == '.',
                     ));
                     self.numeric_value = self.numeric.parse().unwrap();
-                    self.getchar.nth(self.numeric.len());
+                    if self.numeric.len() > 1 {
+                        self.getchar.nth(self.numeric.len() - 2);
+                    }
+
 
                 // Eat comments
                 } else if c == '#' {
