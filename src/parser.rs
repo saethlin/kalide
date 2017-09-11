@@ -1,40 +1,41 @@
+#![allow(unused)]
 use std::collections::HashMap;
 use lexer::{Lexer, Token};
 
 trait ExprAST {}
 
 struct NumberExprAST {
-    Val: f64,
+    val: f64,
 }
 impl ExprAST for NumberExprAST {}
 
 struct VariableExprAST {
-    Name: String,
+    name: String,
 }
 impl ExprAST for VariableExprAST {}
 
 struct BinaryExprAST {
-    Op: char,
-    LHS: Box<ExprAST>,
-    RHS: Box<ExprAST>,
+    op: char,
+    lhs: Box<ExprAST>,
+    rhs: Box<ExprAST>,
 }
 impl ExprAST for BinaryExprAST {}
 
 struct CallExprAST {
-    Callee: String,
-    Args: Vec<Box<ExprAST>>,
+    callee: String,
+    args: Vec<Box<ExprAST>>,
 }
 impl ExprAST for CallExprAST {}
 
 struct PrototypeAST {
-    Name: String,
-    Args: Vec<String>,
+    name: String,
+    args: Vec<String>,
 }
 impl ExprAST for PrototypeAST {}
 
 struct FunctionAST {
-    Proto: Box<PrototypeAST>,
-    Body: Box<ExprAST>,
+    proto: Box<PrototypeAST>,
+    body: Box<ExprAST>,
 }
 impl ExprAST for FunctionAST {}
 
@@ -60,16 +61,25 @@ impl<'a> Parser<'a> {
 
     fn get_next_token(&mut self) -> Token {
         self.current_token = self.lexer.next_token();
+        /*
+        println!(
+            "Found {:?} with {:?}",
+            self.current_token,
+            self.lexer.current_char
+        );
+        */
         self.current_token.clone()
     }
 
     fn parse_number_expr(&mut self) -> Box<NumberExprAST> {
-        let result = Box::new(NumberExprAST { Val: self.lexer.numeric_value });
+        println!("parse_number_expr");
+        let result = Box::new(NumberExprAST { val: self.lexer.numeric_value });
         self.get_next_token();
         result
     }
 
     fn parse_paren_expr(&mut self) -> Box<ExprAST> {
+        println!("parse_paren_expr");
         // eat the (
         self.get_next_token();
         let v = self.parse_expression();
@@ -81,11 +91,12 @@ impl<'a> Parser<'a> {
     // ::= identifier
     // ::= identifier '(' expression* ')'
     fn parse_identifier_expr(&mut self) -> Box<ExprAST> {
+        println!("parse_identifier_expr");
         let id_name = self.lexer.identifier.clone();
         self.get_next_token();
         // simple variable ref
         if self.current_token == Token::Punctuation && self.lexer.current_char == '(' {
-            return Box::new(VariableExprAST { Name: id_name });
+            return Box::new(VariableExprAST { name: id_name });
         }
 
         self.get_next_token();
@@ -107,12 +118,13 @@ impl<'a> Parser<'a> {
         self.get_next_token();
 
         Box::new(CallExprAST {
-            Callee: id_name,
-            Args: args,
+            callee: id_name,
+            args: args,
         })
     }
 
     fn parse_primary(&mut self) -> Box<ExprAST> {
+        println!("parse_primary");
         match self.current_token {
             Token::Identifier => self.parse_identifier_expr(),
             Token::Number => self.parse_number_expr(),
@@ -120,10 +132,14 @@ impl<'a> Parser<'a> {
                 if self.lexer.current_char == '(' {
                     self.parse_paren_expr()
                 } else {
+                    println!("bad puncuation");
                     panic!("unknown token when expecting an expression")
                 }
             }
-            _ => panic!("unknown token when expecting an expression"),
+            _ => {
+                println!("unknown token");
+                panic!("unknown token when expecting an expression")
+            }
         }
     }
 
@@ -134,36 +150,39 @@ impl<'a> Parser<'a> {
     fn parse_binop_rhs(
         &mut self,
         expression_precedence: i64,
-        mut LHS: Box<ExprAST>,
+        mut lhs: Box<ExprAST>,
     ) -> Box<ExprAST> {
+        println!("parse_binop_rhs");
         loop {
             let token_precedence = self.get_token_precedence();
             if token_precedence < expression_precedence {
-                return LHS;
+                return lhs;
             }
             let binop = self.lexer.current_char;
             self.get_next_token();
-            let mut RHS = self.parse_primary();
+            let mut rhs = self.parse_primary();
 
             let next_precedence = self.get_token_precedence();
             if token_precedence < next_precedence {
-                RHS = self.parse_binop_rhs(token_precedence + 1, RHS);
+                rhs = self.parse_binop_rhs(token_precedence + 1, rhs);
             }
 
-            LHS = Box::new(BinaryExprAST {
-                Op: binop,
-                LHS: LHS,
-                RHS: RHS,
+            lhs = Box::new(BinaryExprAST {
+                op: binop,
+                lhs: lhs,
+                rhs: rhs,
             });
         }
     }
 
     fn parse_expression(&mut self) -> Box<ExprAST> {
-        let LHS = self.parse_primary();
-        self.parse_binop_rhs(0, LHS)
+        println!("parse_expression");
+        let lhs = self.parse_primary();
+        self.parse_binop_rhs(0, lhs)
     }
 
     fn parse_prototype(&mut self) -> Box<PrototypeAST> {
+        println!("parse_prototype");
         if self.current_token != Token::Identifier {
             panic!("Expected function name in prototype");
         }
@@ -187,32 +206,34 @@ impl<'a> Parser<'a> {
         self.get_next_token();
 
         Box::new(PrototypeAST {
-            Name: function_name,
-            Args: argnames,
+            name: function_name,
+            args: argnames,
         })
     }
 
     fn parse_definition(&mut self) -> Box<FunctionAST> {
+        println!("parse_definition");
         // Eat the def
         self.get_next_token();
         let proto = self.parse_prototype();
 
         let e = self.parse_expression();
         Box::new(FunctionAST {
-            Proto: proto,
-            Body: e,
+            proto: proto,
+            body: e,
         })
     }
 
     fn parse_top_level_expr(&mut self) -> Box<FunctionAST> {
+        println!("parse_top_level_expr");
         let e = self.parse_expression();
         let proto = Box::new(PrototypeAST {
-            Name: "__anon_expr".to_owned(),
-            Args: Vec::new(),
+            name: "__anon_expr".to_owned(),
+            args: Vec::new(),
         });
         Box::new(FunctionAST {
-            Proto: proto,
-            Body: e,
+            proto: proto,
+            body: e,
         })
     }
 
