@@ -1,3 +1,5 @@
+extern crate llvm_sys;
+
 mod lexer;
 use lexer::Lexer;
 

@@ -2,7 +2,9 @@
 use std::collections::HashMap;
 use lexer::{Lexer, Token};
 
-trait ExprAST {}
+trait ExprAST {
+    fn codegen() 
+}
 
 struct NumberExprAST {
     val: f64,

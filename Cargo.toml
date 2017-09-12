@@ -4,3 +4,4 @@ version = "0.1.0"
 authors = ["Ben"]
 
 [dependencies]
+llvm-sys = "50"
