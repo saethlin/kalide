@@ -61,13 +61,6 @@ impl<'a> Parser<'a> {
 
     fn get_next_token(&mut self) -> Token {
         self.current_token = self.lexer.next_token();
-        /*
-        println!(
-            "Found {:?} with {:?}",
-            self.current_token,
-            self.lexer.current_char
-        );
-        */
         self.current_token.clone()
     }
 
@@ -95,10 +88,11 @@ impl<'a> Parser<'a> {
         let id_name = self.lexer.identifier.clone();
         self.get_next_token();
         // simple variable ref
-        if self.current_token == Token::Punctuation && self.lexer.current_char == '(' {
+        if self.current_token == Token::Punctuation && self.lexer.current_char != '(' {
             return Box::new(VariableExprAST { name: id_name });
         }
 
+        println!("found call to function {}", id_name);
         self.get_next_token();
         let mut args = Vec::new();
         loop {
@@ -109,12 +103,13 @@ impl<'a> Parser<'a> {
                 break;
             }
 
-            if self.lexer.current_char != ',' {
+            if self.current_token == Token::Punctuation && self.lexer.current_char != ',' {
                 panic!("Expected ) or , in argument list")
             }
             self.get_next_token();
         }
 
+        // Eat the )
         self.get_next_token();
 
         Box::new(CallExprAST {
@@ -132,14 +127,10 @@ impl<'a> Parser<'a> {
                 if self.lexer.current_char == '(' {
                     self.parse_paren_expr()
                 } else {
-                    println!("bad puncuation");
-                    panic!("unknown token when expecting an expression")
+                    panic!("Expected (, found {}", self.lexer.current_char);
                 }
             }
-            _ => {
-                println!("unknown token");
-                panic!("unknown token when expecting an expression")
-            }
+            _ => panic!("unknown token when expecting an expression"),
         }
     }
 
@@ -154,12 +145,14 @@ impl<'a> Parser<'a> {
     ) -> Box<ExprAST> {
         println!("parse_binop_rhs");
         loop {
+            println!("{}", self.lexer.current_char);
             let token_precedence = self.get_token_precedence();
             if token_precedence < expression_precedence {
                 return lhs;
             }
             let binop = self.lexer.current_char;
             self.get_next_token();
+
             let mut rhs = self.parse_primary();
 
             let next_precedence = self.get_token_precedence();
@@ -260,6 +253,11 @@ impl<'a> Parser<'a> {
     pub fn run(&mut self) {
         self.get_next_token();
         loop {
+            // Ignore line endings wtf
+            if self.lexer.current_char == ';' && self.current_token == Token::Punctuation {
+                self.get_next_token();
+                continue;
+            }
             match self.current_token {
                 Token::EOF => return,
                 Token::Definition => self.handle_definition(),
