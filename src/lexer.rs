@@ -1,5 +1,6 @@
 use std::str::Chars;
 use std::iter::Peekable;
+use std::ffi::CString;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
@@ -28,6 +29,12 @@ impl<'a> Lexer<'a> {
             numeric_value: 0.0,
             getchar: input.chars().peekable(),
         }
+    }
+
+    pub fn identifier(&self) -> CString {
+        let mut data = self.identifier.chars().map(|c| c as i8).collect::<Vec<_>>();
+        data.push(0);
+        CString::from_raw(data.as_mut_ptr())
     }
 
     pub fn next_token(&mut self) -> Token {

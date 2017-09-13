@@ -2,62 +2,184 @@
 use std::collections::HashMap;
 use lexer::{Lexer, Token};
 
+use llvm_sys::LLVMRealPredicate;
+use llvm_sys::core::*;
+use llvm_sys::prelude::*;
+
+use std::rc::Rc;
+use std::ffi::{CString, CStr};
+
+const LLVM_FALSE: LLVMBool = 0;
+const LLVM_TRUE: LLVMBool = 1;
+
 trait ExprAST {
-    fn codegen() 
+    fn codegen(&self) -> LLVMValueRef;
 }
 
 struct NumberExprAST {
     val: f64,
 }
-impl ExprAST for NumberExprAST {}
-
-struct VariableExprAST {
-    name: String,
+impl ExprAST for NumberExprAST {
+    fn codegen(&self) -> LLVMValueRef {
+        LLVMConstReal(LLVMDoubleType(), self.val)
+    }
 }
-impl ExprAST for VariableExprAST {}
 
-struct BinaryExprAST {
+struct VariableExprAST<'a> {
+    parser: Rc<Parser<'a>>,
+    name: CString,
+}
+impl<'a> ExprAST for VariableExprAST<'a> {
+    fn codegen(&self) -> LLVMValueRef {
+        *self.parser.names.get(&self.name).unwrap()
+    }
+}
+
+struct BinaryExprAST<'a> {
+    parser: Rc<Parser<'a>>,
     op: char,
     lhs: Box<ExprAST>,
     rhs: Box<ExprAST>,
 }
-impl ExprAST for BinaryExprAST {}
+impl<'a> ExprAST for BinaryExprAST<'a> {
+    fn codegen(&self) -> LLVMValueRef {
+        let l = self.lhs.codegen();
+        let r = self.rhs.codegen();
 
-struct CallExprAST {
-    callee: String,
+        match self.op {
+            '+' => {
+                LLVMBuildFAdd(
+                    self.parser.builder,
+                    l,
+                    r,
+                    CStr::from_bytes_with_nul(b"addtmp\0").unwrap().as_ptr(),
+                )
+            }
+            '-' => {
+                LLVMBuildFSub(
+                    self.parser.builder,
+                    l,
+                    r,
+                    CStr::from_bytes_with_nul_unchecked(b"subtmp\0").as_ptr(),
+                )
+            }
+            '*' => {
+                LLVMBuildFMul(
+                    self.parser.builder,
+                    l,
+                    r,
+                    CStr::from_bytes_with_nul_unchecked(b"multmp\0").as_ptr(),
+                )
+            }
+            '<' => {
+                // Convert to boolean here apparently?
+                LLVMBuildFCmp(
+                    self.parser.builder,
+                    LLVMRealPredicate::LLVMRealORD,
+                    l,
+                    r,
+                    CStr::from_bytes_with_nul_unchecked(b"cmptmp\0").as_ptr(),
+                )
+            }
+            _ => unreachable!(),            
+        }
+    }
+}
+
+struct CallExprAST<'a> {
+    parser: Rc<Parser<'a>>,
+    callee: CString,
     args: Vec<Box<ExprAST>>,
 }
-impl ExprAST for CallExprAST {}
+impl<'a> ExprAST for CallExprAST<'a> {
+    fn codegen(&self) -> LLVMValueRef {
+        let llvm_callee = LLVMGetNamedFunction(self.parser.module, self.callee.as_ptr());
+        // use LLVMFunctionType to validate the function
 
-struct PrototypeAST {
-    name: String,
-    args: Vec<String>,
+        let llvm_args: Vec<_> = self.args.iter().map(|arg| arg.codegen()).collect();
+        LLVMBuildCall(
+            self.parser.builder,
+            llvm_callee,
+            llvm_args.as_mut_ptr(),
+            llvm_args.len() as u32,
+            self.callee.as_ptr(),
+        )
+    }
 }
-impl ExprAST for PrototypeAST {}
 
-struct FunctionAST {
-    proto: Box<PrototypeAST>,
+struct PrototypeAST<'a> {
+    parser: Rc<Parser<'a>>,
+    name: CString,
+    args: Vec<CString>,
+}
+impl<'a> ExprAST for PrototypeAST<'a> {
+    fn codegen(&self) -> LLVMValueRef {
+        let arg_types: Vec<_> = self.args
+            .iter()
+            .map(|_| LLVMDoubleTypeInContext(self.parser.context))
+            .collect();
+        let fn_type = LLVMFunctionType(
+            LLVMDoubleTypeInContext(self.parser.context),
+            arg_types.as_mut_ptr(),
+            arg_types.len() as u32,
+            LLVM_FALSE,
+        );
+        LLVMAddFunction(self.parser.module, self.name.as_ptr(), fn_type)
+    }
+}
+
+struct FunctionAST<'a> {
+    parser: Rc<Parser<'a>>,
+    proto: Box<PrototypeAST<'a>>,
     body: Box<ExprAST>,
 }
-impl ExprAST for FunctionAST {}
+impl<'a> FunctionAST<'a> {
+    fn codegen(&mut self) {
+        let the_function = LLVMGetNamedFunction(self.parser.module, self.proto.name.as_ptr());
+        let basic_block = LLVMGetInsertBlock(self.parser.builder);
+        LLVMInsertIntoBuilderWithName(
+            self.parser.builder,
+            LLVMBasicBlockAsValue(basic_block),
+            CStr::from_bytes_with_nul_unchecked(b"entry\0").as_ptr(),
+        );
+        self.parser.names.clear();
+
+    }
+}
 
 pub struct Parser<'a> {
     precedence: HashMap<char, i64>,
     lexer: Lexer<'a>,
     current_token: Token,
+
+    // codegen stuff
+    context: LLVMContextRef,
+    builder: LLVMBuilderRef,
+    module: LLVMModuleRef,
+    names: HashMap<CString, LLVMValueRef>,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(l: Lexer<'a>) -> Self {
+    pub fn new(lex: Lexer<'a>) -> Self {
         let mut precedence = HashMap::new();
         precedence.insert('<', 10);
         precedence.insert('+', 20);
         precedence.insert('-', 20);
         precedence.insert('*', 40);
+        let context = LLVMContextCreate();
+        let builder = LLVMCreateBuilderInContext(context);
+        let module = LLVMModuleCreateWithNameInContext(
+            CStr::from_bytes_with_nul_unchecked(b"Kalide Compiler\0").as_ptr(),
+            context,
+        );
         Parser {
             precedence: precedence,
-            lexer: l,
+            lexer: lex,
             current_token: Token::Identifier,
+            context: context,
+            builder: builder,
+            module: module,
+            names: HashMap::new(),
         }
     }
 
@@ -87,14 +209,17 @@ impl<'a> Parser<'a> {
     // ::= identifier '(' expression* ')'
     fn parse_identifier_expr(&mut self) -> Box<ExprAST> {
         println!("parse_identifier_expr");
-        let id_name = self.lexer.identifier.clone();
+        let id_name = self.lexer.identifier();
         self.get_next_token();
         // simple variable ref
         if self.current_token == Token::Punctuation && self.lexer.current_char != '(' {
-            return Box::new(VariableExprAST { name: id_name });
+            return Box::new(VariableExprAST {
+                parser: Rc::new(*self),
+                name: id_name,
+            });
         }
 
-        println!("found call to function {}", id_name);
+        println!("found call to function {:?}", id_name);
         self.get_next_token();
         let mut args = Vec::new();
         loop {
@@ -115,6 +240,7 @@ impl<'a> Parser<'a> {
         self.get_next_token();
 
         Box::new(CallExprAST {
+            parser: Rc::new(*self),
             callee: id_name,
             args: args,
         })
@@ -163,6 +289,7 @@ impl<'a> Parser<'a> {
             }
 
             lhs = Box::new(BinaryExprAST {
+                parser: Rc::new(*self),
                 op: binop,
                 lhs: lhs,
                 rhs: rhs,
@@ -181,7 +308,7 @@ impl<'a> Parser<'a> {
         if self.current_token != Token::Identifier {
             panic!("Expected function name in prototype");
         }
-        let function_name = self.lexer.identifier.clone();
+        let function_name = self.lexer.identifier();
 
         self.get_next_token();
         if self.lexer.current_char != '(' {
@@ -190,7 +317,7 @@ impl<'a> Parser<'a> {
 
         let mut argnames = Vec::new();
         while self.get_next_token() == Token::Identifier {
-            argnames.push(self.lexer.identifier.clone());
+            argnames.push(self.lexer.identifier());
         }
 
         if self.lexer.current_char != ')' {
@@ -201,6 +328,7 @@ impl<'a> Parser<'a> {
         self.get_next_token();
 
         Box::new(PrototypeAST {
+            parser: Rc::new(*self),
             name: function_name,
             args: argnames,
         })
@@ -214,6 +342,7 @@ impl<'a> Parser<'a> {
 
         let e = self.parse_expression();
         Box::new(FunctionAST {
+            parser: Rc::new(*self),
             proto: proto,
             body: e,
         })
@@ -223,10 +352,12 @@ impl<'a> Parser<'a> {
         println!("parse_top_level_expr");
         let e = self.parse_expression();
         let proto = Box::new(PrototypeAST {
-            name: "__anon_expr".to_owned(),
+            parser: Rc::new(*self),
+            name: CStr::from_bytes_with_nul_unchecked(b"__anon_expr\0").to_owned(),
             args: Vec::new(),
         });
         Box::new(FunctionAST {
+            parser: Rc::new(*self),
             proto: proto,
             body: e,
         })
