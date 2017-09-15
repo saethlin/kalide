@@ -44,13 +44,13 @@ enum ExprNode {
     ForLoop(Box<ExprNode>, Box<ExprNode>, Option<Box<ExprNode>>, Box<ExprNode>),
 }
 
-struct PrototypeAST {
+struct Prototype {
     name: CString,
     args: Vec<CString>,
 }
 
-struct FunctionAST {
-    proto: Box<PrototypeAST>,
+struct Function {
+    proto: Box<Prototype>,
     body: Box<ExprNode>,
 }
 
@@ -132,7 +132,7 @@ impl<'a> ExprAST for CallExprAST<'a> {
 }
 */
 /*
-impl<'a> ExprAST for PrototypeAST<'a> {
+impl<'a> ExprAST for Prototype<'a> {
     fn codegen(&self) -> LLVMValueRef {
         let arg_types: Vec<_> = self.args
             .iter()
@@ -149,7 +149,7 @@ impl<'a> ExprAST for PrototypeAST<'a> {
 }
 */
 /*
-impl<'a> FunctionAST<'a> {
+impl<'a> Function<'a> {
     fn codegen(&mut self) {
         let the_function = LLVMGetNamedFunction(self.parser.module, self.proto.name.as_ptr());
         let basic_block = LLVMGetInsertBlock(self.parser.builder);
@@ -353,7 +353,7 @@ impl<'a> Parser<'a> {
         self.parse_binop_rhs(0, lhs)
     }
 
-    fn parse_prototype(&mut self) -> Result<Box<PrototypeAST>, ParseError> {
+    fn parse_prototype(&mut self) -> Result<Box<Prototype>, ParseError> {
         if let Token::Identifier(function_name) = self.current_token.clone() {
             if let Token::Punctuation(c) = self.get_next_token() {
                 if c != '(' {
@@ -380,7 +380,7 @@ impl<'a> Parser<'a> {
             // eat the )
             self.get_next_token();
 
-            Ok(Box::new(PrototypeAST {
+            Ok(Box::new(Prototype {
                 name: CString::new(function_name.as_bytes()).unwrap(),
                 args: argnames,
             }))
@@ -389,13 +389,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_definition(&mut self) -> Result<Box<FunctionAST>, ParseError> {
+    fn parse_definition(&mut self) -> Result<Box<Function>, ParseError> {
         // Eat the def
         self.get_next_token();
         let proto = self.parse_prototype()?;
 
         let body = self.parse_expression()?;
-        Ok(Box::new(FunctionAST {
+        Ok(Box::new(Function {
             proto: proto,
             body: body,
         }))
@@ -459,21 +459,21 @@ impl<'a> Parser<'a> {
         Ok(Box::new(ExprNode::ForLoop(start, end, step, body)))
     }
 
-    fn parse_top_level_expr(&mut self) -> Result<Box<FunctionAST>, ParseError> {
+    fn parse_top_level_expr(&mut self) -> Result<Box<Function>, ParseError> {
         let body = self.parse_expression()?;
-        let proto = Box::new(PrototypeAST {
+        let proto = Box::new(Prototype {
             name: CStr::from_bytes_with_nul(b"__anon_expr\0")
                 .unwrap()
                 .to_owned(),
             args: Vec::new(),
         });
-        Ok(Box::new(FunctionAST {
+        Ok(Box::new(Function {
             proto: proto,
             body: body,
         }))
     }
 
-    fn parse_extern(&mut self) -> Result<Box<PrototypeAST>, ParseError> {
+    fn parse_extern(&mut self) -> Result<Box<Prototype>, ParseError> {
         // eat the extern
         self.get_next_token();
         self.parse_prototype()
