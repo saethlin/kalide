@@ -13,7 +13,7 @@ fn main() {
         "def foo(x y) x+y; y;",
     ];
 
-    for test in tests.iter() {
+    for test in &tests {
         println!("Parsing\n{}\n", test);
         let lexer = Lexer::new(test);
         let mut parser = Parser::new(lexer);

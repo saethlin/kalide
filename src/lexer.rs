@@ -48,7 +48,7 @@ impl<'a> Lexer<'a> {
                 return match self.buffer.as_str() {
                     "def" => Token::Definition,
                     "extern" => Token::Extern,
-                    _ => Token::Identifier(self.buffer),
+                    _ => Token::Identifier(self.buffer.clone()),
                 };
             // Numeric literal
             } else if c.is_numeric() || c == '.' {
@@ -62,7 +62,7 @@ impl<'a> Lexer<'a> {
                 }
                 return match self.buffer.parse() {
                     Ok(number) => Token::Number(number),
-                    Err(_) => panic!("Invalid numeric literal {}", self.buffer),
+                    Err(..) => panic!("Invalid numeric literal {}", self.buffer),
                 };
             } else {
                 return Token::Punctuation(c);

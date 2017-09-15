@@ -13,34 +13,39 @@ const LLVM_FALSE: LLVMBool = 0;
 const LLVM_TRUE: LLVMBool = 1;
 
 trait ExprAST {
-    fn codegen(&self) -> LLVMValueRef;
+    //    fn codegen(&self) -> LLVMValueRef;
 }
 
 struct NumberExprAST {
     val: f64,
 }
+impl ExprAST for NumberExprAST {}
+/*
 impl ExprAST for NumberExprAST {
     fn codegen(&self) -> LLVMValueRef {
         LLVMConstReal(LLVMDoubleType(), self.val)
     }
 }
-
-struct VariableExprAST<'a> {
-    parser: Rc<Parser<'a>>,
+*/
+struct VariableExprAST {
     name: CString,
 }
+
+impl ExprAST for VariableExprAST {}
+/*
 impl<'a> ExprAST for VariableExprAST<'a> {
     fn codegen(&self) -> LLVMValueRef {
         *self.parser.names.get(&self.name).unwrap()
     }
 }
-
-struct BinaryExprAST<'a> {
-    parser: Rc<Parser<'a>>,
+*/
+struct BinaryExprAST {
     op: char,
     lhs: Box<ExprAST>,
     rhs: Box<ExprAST>,
 }
+impl ExprAST for BinaryExprAST {}
+/*
 impl<'a> ExprAST for BinaryExprAST<'a> {
     fn codegen(&self) -> LLVMValueRef {
         let l = self.lhs.codegen();
@@ -85,12 +90,13 @@ impl<'a> ExprAST for BinaryExprAST<'a> {
         }
     }
 }
-
-struct CallExprAST<'a> {
-    parser: Rc<Parser<'a>>,
+*/
+struct CallExprAST {
     callee: CString,
     args: Vec<Box<ExprAST>>,
 }
+impl ExprAST for CallExprAST {}
+/*
 impl<'a> ExprAST for CallExprAST<'a> {
     fn codegen(&self) -> LLVMValueRef {
         let llvm_callee = LLVMGetNamedFunction(self.parser.module, self.callee.as_ptr());
@@ -106,12 +112,12 @@ impl<'a> ExprAST for CallExprAST<'a> {
         )
     }
 }
-
-struct PrototypeAST<'a> {
-    parser: Rc<Parser<'a>>,
+*/
+struct PrototypeAST {
     name: CString,
     args: Vec<CString>,
 }
+/*
 impl<'a> ExprAST for PrototypeAST<'a> {
     fn codegen(&self) -> LLVMValueRef {
         let arg_types: Vec<_> = self.args
@@ -127,12 +133,13 @@ impl<'a> ExprAST for PrototypeAST<'a> {
         LLVMAddFunction(self.parser.module, self.name.as_ptr(), fn_type)
     }
 }
+*/
 
-struct FunctionAST<'a> {
-    parser: Rc<Parser<'a>>,
-    proto: Box<PrototypeAST<'a>>,
+struct FunctionAST {
+    proto: Box<PrototypeAST>,
     body: Box<ExprAST>,
 }
+/*
 impl<'a> FunctionAST<'a> {
     fn codegen(&mut self) {
         let the_function = LLVMGetNamedFunction(self.parser.module, self.proto.name.as_ptr());
@@ -146,7 +153,7 @@ impl<'a> FunctionAST<'a> {
 
     }
 }
-
+*/
 pub struct Parser<'a> {
     precedence: HashMap<char, i64>,
     lexer: Lexer<'a>,
@@ -159,27 +166,32 @@ pub struct Parser<'a> {
     names: HashMap<CString, LLVMValueRef>,
 }
 
+
 impl<'a> Parser<'a> {
     pub fn new(lex: Lexer<'a>) -> Self {
-        let mut precedence = HashMap::new();
-        precedence.insert('<', 10);
-        precedence.insert('+', 20);
-        precedence.insert('-', 20);
-        precedence.insert('*', 40);
-        let context = LLVMContextCreate();
-        let builder = LLVMCreateBuilderInContext(context);
-        let module = LLVMModuleCreateWithNameInContext(
-            CStr::from_bytes_with_nul_unchecked(b"Kalide Compiler\0").as_ptr(),
-            context,
-        );
-        Parser {
-            precedence: precedence,
-            lexer: lex,
-            current_token: Token::Identifier,
-            context: context,
-            builder: builder,
-            module: module,
-            names: HashMap::new(),
+        unsafe {
+            let mut precedence = HashMap::new();
+            precedence.insert('<', 10);
+            precedence.insert('+', 20);
+            precedence.insert('-', 20);
+            precedence.insert('*', 40);
+            let context = LLVMContextCreate();
+            let builder = LLVMCreateBuilderInContext(context);
+            let module = LLVMModuleCreateWithNameInContext(
+                CStr::from_bytes_with_nul(b"Kalide Compiler\0")
+                    .unwrap()
+                    .as_ptr(),
+                context,
+            );
+            Parser {
+                precedence: precedence,
+                lexer: lex,
+                current_token: Token::Identifier("".to_owned()),
+                context: context,
+                builder: builder,
+                module: module,
+                names: HashMap::new(),
+            }
         }
     }
 
@@ -188,74 +200,84 @@ impl<'a> Parser<'a> {
         self.current_token.clone()
     }
 
-    fn parse_number_expr(&mut self) -> Box<NumberExprAST> {
+    fn parse_number_expr(&mut self) -> Option<Box<ExprAST>> {
         println!("parse_number_expr");
-        let result = Box::new(NumberExprAST { val: self.lexer.numeric_value });
-        self.get_next_token();
-        result
+        if let Token::Number(value) = self.current_token {
+            self.get_next_token();
+            Some(Box::new(NumberExprAST { val: value }))
+        } else {
+            None
+        }
     }
 
-    fn parse_paren_expr(&mut self) -> Box<ExprAST> {
+    fn parse_paren_expr(&mut self) -> Option<Box<ExprAST>> {
         println!("parse_paren_expr");
-        // eat the (
-        self.get_next_token();
-        let v = self.parse_expression();
-        // eat the )
-        self.get_next_token();
-        v
+        if let Token::Punctuation(_) = self.current_token {
+            // Eat the (
+            self.get_next_token();
+            let v = self.parse_expression();
+            // Eat the )
+            self.get_next_token();
+            v
+        } else {
+            None
+        }
     }
 
     // ::= identifier
     // ::= identifier '(' expression* ')'
-    fn parse_identifier_expr(&mut self) -> Box<ExprAST> {
+    fn parse_identifier_expr(&mut self) -> Option<Box<ExprAST>> {
         println!("parse_identifier_expr");
-        let id_name = self.lexer.identifier();
+        let id_name = match self.current_token {
+            Token::Identifier(ref name) => name.clone(),
+            _ => panic!("Expected identifier"),
+        };
+        //TODO What is this eating?
         self.get_next_token();
         // simple variable ref
-        if self.current_token == Token::Punctuation && self.lexer.current_char != '(' {
-            return Box::new(VariableExprAST {
-                parser: Rc::new(*self),
-                name: id_name,
-            });
+        if let Token::Punctuation(c) = self.current_token {
+            if c != '(' {
+                return Some(Box::new(VariableExprAST {
+                    name: CString::new(id_name.as_bytes()).unwrap(),
+                }));
+            }
         }
 
         println!("found call to function {:?}", id_name);
         self.get_next_token();
         let mut args = Vec::new();
         loop {
-            let arg = self.parse_expression();
-            args.push(arg);
-
-            if self.current_token == Token::Punctuation && self.lexer.current_char == ')' {
-                break;
+            if let Some(arg) = self.parse_expression() {
+                args.push(arg)
+            } else if let Token::Punctuation(c) = self.current_token {
+                if c == ')' {
+                    break;
+                } else {
+                    panic!("Expected ) or , in argument list")
+                }
             }
 
-            if self.current_token == Token::Punctuation && self.lexer.current_char != ',' {
-                panic!("Expected ) or , in argument list")
-            }
             self.get_next_token();
         }
 
         // Eat the )
         self.get_next_token();
 
-        Box::new(CallExprAST {
-            parser: Rc::new(*self),
-            callee: id_name,
+        Some(Box::new(CallExprAST {
+            callee: CString::new(id_name.as_bytes()).unwrap(),
             args: args,
-        })
+        }))
     }
 
-    fn parse_primary(&mut self) -> Box<ExprAST> {
+    fn parse_primary(&mut self) -> Option<Box<ExprAST>> {
         println!("parse_primary");
         match self.current_token {
-            Token::Identifier => self.parse_identifier_expr(),
-            Token::Number => self.parse_number_expr(),
-            Token::Punctuation => {
-                if self.lexer.current_char == '(' {
-                    self.parse_paren_expr()
-                } else {
-                    panic!("Expected (, found {}", self.lexer.current_char);
+            Token::Identifier(_) => self.parse_identifier_expr(),
+            Token::Number(_) => self.parse_number_expr(),
+            Token::Punctuation(c) => {
+                match c {
+                    '(' => self.parse_paren_expr(),
+                    _ => panic!("Expected ( , fond {}", c),
                 }
             }
             _ => panic!("unknown token when expecting an expression"),
@@ -263,24 +285,31 @@ impl<'a> Parser<'a> {
     }
 
     fn get_token_precedence(&mut self) -> i64 {
-        *self.precedence.get(&self.lexer.current_char).unwrap_or(&-1)
+        if let Token::Punctuation(c) = self.current_token {
+            *self.precedence.get(&c).unwrap_or(&-1)
+        } else {
+            unreachable!()
+        }
     }
 
+    // TODO check this function
     fn parse_binop_rhs(
         &mut self,
         expression_precedence: i64,
-        mut lhs: Box<ExprAST>,
-    ) -> Box<ExprAST> {
+        mut lhs: Option<Box<ExprAST>>,
+    ) -> Option<Box<ExprAST>> {
         println!("parse_binop_rhs");
         loop {
-            println!("{}", self.lexer.current_char);
-            let token_precedence = self.get_token_precedence();
+            let binop = match self.current_token {
+                Token::Punctuation(op) => op,
+                _ => unreachable!(),
+            };
+            let token_precedence = *self.precedence.get(&binop).unwrap_or(&-1);
             if token_precedence < expression_precedence {
                 return lhs;
             }
-            let binop = self.lexer.current_char;
-            self.get_next_token();
 
+            self.get_next_token();
             let mut rhs = self.parse_primary();
 
             let next_precedence = self.get_token_precedence();
@@ -288,82 +317,81 @@ impl<'a> Parser<'a> {
                 rhs = self.parse_binop_rhs(token_precedence + 1, rhs);
             }
 
-            lhs = Box::new(BinaryExprAST {
-                parser: Rc::new(*self),
+            lhs = Some(Box::new(BinaryExprAST {
                 op: binop,
-                lhs: lhs,
-                rhs: rhs,
-            });
+                lhs: lhs.unwrap(),
+                rhs: rhs.unwrap(),
+            }));
         }
     }
 
-    fn parse_expression(&mut self) -> Box<ExprAST> {
+    fn parse_expression(&mut self) -> Option<Box<ExprAST>> {
         println!("parse_expression");
         let lhs = self.parse_primary();
         self.parse_binop_rhs(0, lhs)
     }
 
-    fn parse_prototype(&mut self) -> Box<PrototypeAST> {
-        println!("parse_prototype");
-        if self.current_token != Token::Identifier {
-            panic!("Expected function name in prototype");
+    fn parse_prototype(&mut self) -> Option<Box<PrototypeAST>> {
+        if let Token::Identifier(function_name) = self.current_token.clone() {
+            self.get_next_token();
+            if let Token::Punctuation(c) = self.current_token {
+                if c != '(' {
+                    panic!("Expected ( in prototype");
+                }
+            }
+
+            let mut argnames = Vec::new();
+            while let Token::Identifier(id) = self.get_next_token() {
+                argnames.push(CString::new(id.as_bytes()).unwrap());
+            }
+
+            if let Token::Punctuation(c) = self.current_token {
+                if c != ')' {
+                    panic!("Expected ) in prototype");
+                }
+            }
+            // eat the )
+            self.get_next_token();
+
+            Some(Box::new(PrototypeAST {
+                name: CString::new(function_name.as_bytes()).unwrap(),
+                args: argnames,
+            }))
+        } else {
+            None
         }
-        let function_name = self.lexer.identifier();
-
-        self.get_next_token();
-        if self.lexer.current_char != '(' {
-            panic!("Expected ( in prototype");
-        }
-
-        let mut argnames = Vec::new();
-        while self.get_next_token() == Token::Identifier {
-            argnames.push(self.lexer.identifier());
-        }
-
-        if self.lexer.current_char != ')' {
-            panic!("Expected ) in prototype")
-        }
-
-        // eat the )
-        self.get_next_token();
-
-        Box::new(PrototypeAST {
-            parser: Rc::new(*self),
-            name: function_name,
-            args: argnames,
-        })
     }
 
-    fn parse_definition(&mut self) -> Box<FunctionAST> {
+    fn parse_definition(&mut self) -> Option<Box<FunctionAST>> {
         println!("parse_definition");
         // Eat the def
         self.get_next_token();
         let proto = self.parse_prototype();
 
-        let e = self.parse_expression();
-        Box::new(FunctionAST {
-            parser: Rc::new(*self),
-            proto: proto,
-            body: e,
-        })
+        let body = self.parse_expression();
+        Some(Box::new(FunctionAST {
+            proto: proto.unwrap(),
+            body: body.unwrap(),
+        }))
     }
 
-    fn parse_top_level_expr(&mut self) -> Box<FunctionAST> {
+    fn parse_top_level_expr(&mut self) -> Option<Box<FunctionAST>> {
         println!("parse_top_level_expr");
         let e = self.parse_expression();
         let proto = Box::new(PrototypeAST {
-            parser: Rc::new(*self),
-            name: CStr::from_bytes_with_nul_unchecked(b"__anon_expr\0").to_owned(),
+            name: CStr::from_bytes_with_nul(b"__anon_expr\0")
+                .unwrap()
+                .to_owned(),
             args: Vec::new(),
         });
-        Box::new(FunctionAST {
-            parser: Rc::new(*self),
+        Some(Box::new(FunctionAST {
             proto: proto,
-            body: e,
-        })
+            body: e.unwrap(),
+        }))
     }
 
-    fn parse_extern(&mut self) -> Box<PrototypeAST> {
+    fn parse_extern(&mut self) -> Option<Box<PrototypeAST>> {
+        // eat the extern
         self.get_next_token();
         self.parse_prototype()
     }
@@ -386,12 +414,8 @@ impl<'a> Parser<'a> {
     pub fn run(&mut self) {
         self.get_next_token();
         loop {
-            // Ignore line endings wtf
-            if self.lexer.current_char == ';' && self.current_token == Token::Punctuation {
-                self.get_next_token();
-                continue;
-            }
             match self.current_token {
+                Token::Punctuation(_) => {} // ignores line endings???
                 Token::EOF => return,
                 Token::Definition => self.handle_definition(),
                 Token::Extern => self.handle_extern(),
