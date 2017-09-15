@@ -34,14 +34,25 @@ impl fmt::Display for ParseError {
     }
 }
 
-trait ExprAST {
-    //    fn codegen(&self) -> LLVMValueRef;
+enum ExprNode {
+    Number(f64),
+    Variable(CString),
+    BinaryOperation(char, Box<ExprNode>, Box<ExprNode>),
+    FunctionCall(CString, Vec<Box<ExprNode>>),
+    IfElse(Box<ExprNode>, Box<ExprNode>, Box<ExprNode>),
+    ForLoop(Box<ExprNode>, Box<ExprNode>, Option<Box<ExprNode>>, Box<ExprNode>),
 }
 
-struct NumberExprAST {
-    val: f64,
+struct PrototypeAST {
+    name: CString,
+    args: Vec<CString>,
 }
-impl ExprAST for NumberExprAST {}
+
+struct FunctionAST {
+    proto: Box<PrototypeAST>,
+    body: Box<ExprNode>,
+}
+
 /*
 impl ExprAST for NumberExprAST {
     fn codegen(&self) -> LLVMValueRef {
@@ -49,11 +60,6 @@ impl ExprAST for NumberExprAST {
     }
 }
 */
-struct VariableExprAST {
-    name: CString,
-}
-
-impl ExprAST for VariableExprAST {}
 /*
 impl<'a> ExprAST for VariableExprAST<'a> {
     fn codegen(&self) -> LLVMValueRef {
@@ -61,12 +67,6 @@ impl<'a> ExprAST for VariableExprAST<'a> {
     }
 }
 */
-struct BinaryExprAST {
-    op: char,
-    lhs: Box<ExprAST>,
-    rhs: Box<ExprAST>,
-}
-impl ExprAST for BinaryExprAST {}
 /*
 impl<'a> ExprAST for BinaryExprAST<'a> {
     fn codegen(&self) -> LLVMValueRef {
@@ -113,11 +113,6 @@ impl<'a> ExprAST for BinaryExprAST<'a> {
     }
 }
 */
-struct CallExprAST {
-    callee: CString,
-    args: Vec<Box<ExprAST>>,
-}
-impl ExprAST for CallExprAST {}
 /*
 impl<'a> ExprAST for CallExprAST<'a> {
     fn codegen(&self) -> LLVMValueRef {
@@ -135,10 +130,6 @@ impl<'a> ExprAST for CallExprAST<'a> {
     }
 }
 */
-struct PrototypeAST {
-    name: CString,
-    args: Vec<CString>,
-}
 /*
 impl<'a> ExprAST for PrototypeAST<'a> {
     fn codegen(&self) -> LLVMValueRef {
@@ -156,11 +147,6 @@ impl<'a> ExprAST for PrototypeAST<'a> {
     }
 }
 */
-
-struct FunctionAST {
-    proto: Box<PrototypeAST>,
-    body: Box<ExprAST>,
-}
 /*
 impl<'a> FunctionAST<'a> {
     fn codegen(&mut self) {
@@ -176,14 +162,6 @@ impl<'a> FunctionAST<'a> {
     }
 }
 */
-
-struct IfElseAst {
-    condition: Box<ExprAST>,
-    then_body: Box<ExprAST>,
-    else_body: Box<ExprAST>,
-}
-impl ExprAST for IfElseAst {}
-
 
 pub struct Parser<'a> {
     precedence: HashMap<char, i64>,
@@ -233,17 +211,17 @@ impl<'a> Parser<'a> {
         self.current_token.clone()
     }
 
-    fn parse_number_expr(&mut self) -> Result<Box<ExprAST>, ParseError> {
+    fn parse_number_expr(&mut self) -> Result<Box<ExprNode>, ParseError> {
         if let Token::Number(value) = self.current_token {
             // Consume the number token
             self.get_next_token();
-            Ok(Box::new(NumberExprAST { val: value }))
+            Ok(Box::new(ExprNode::Number(value)))
         } else {
             Err(self.error("Not a number token"))
         }
     }
 
-    fn parse_paren_expr(&mut self) -> Result<Box<ExprAST>, ParseError> {
+    fn parse_paren_expr(&mut self) -> Result<Box<ExprNode>, ParseError> {
         if let Token::Punctuation('(') = self.current_token {
             // Eat the (
             // TODO: Both of these get_next_token need to match to ensure they are correct and return errors if not
@@ -259,7 +237,7 @@ impl<'a> Parser<'a> {
 
     // ::= identifier
     // ::= identifier '(' expression* ')'
-    fn parse_identifier_expr(&mut self) -> Result<Box<ExprAST>, ParseError> {
+    fn parse_identifier_expr(&mut self) -> Result<Box<ExprNode>, ParseError> {
         let id_name = match self.current_token {
             Token::Identifier(ref name) => name.clone(),
             _ => return Err(self.error("Expected valid identifier")),
@@ -269,9 +247,9 @@ impl<'a> Parser<'a> {
         // simple variable ref
         if let Token::Punctuation(c) = self.get_next_token() {
             if c != '(' {
-                return Ok(Box::new(VariableExprAST {
-                    name: CString::new(id_name.as_bytes()).unwrap(),
-                }));
+                return Ok(Box::new(ExprNode::Variable(
+                    CString::new(id_name.as_bytes()).unwrap(),
+                )));
             }
         }
 
@@ -301,13 +279,13 @@ impl<'a> Parser<'a> {
         // Eat the )
         self.get_next_token();
 
-        Ok(Box::new(CallExprAST {
-            callee: CString::new(id_name.as_bytes()).unwrap(),
-            args: args,
-        }))
+        Ok(Box::new(ExprNode::FunctionCall(
+            CString::new(id_name.as_bytes()).unwrap(),
+            args,
+        )))
     }
 
-    fn parse_primary(&mut self) -> Result<Box<ExprAST>, ParseError> {
+    fn parse_primary(&mut self) -> Result<Box<ExprNode>, ParseError> {
         match self.current_token {
             Token::Identifier(..) => self.parse_identifier_expr(),
             Token::Number(..) => self.parse_number_expr(),
@@ -321,8 +299,8 @@ impl<'a> Parser<'a> {
     fn parse_binop_rhs(
         &mut self,
         expression_precedence: i64,
-        mut lhs: Box<ExprAST>,
-    ) -> Result<Box<ExprAST>, ParseError> {
+        mut lhs: Box<ExprNode>,
+    ) -> Result<Box<ExprNode>, ParseError> {
         loop {
             let binop = match self.current_token {
                 Token::Punctuation(op) => op,
@@ -346,15 +324,13 @@ impl<'a> Parser<'a> {
                 rhs = self.parse_binop_rhs(token_precedence + 1, rhs)?;
             }
 
-            lhs = Box::new(BinaryExprAST {
-                op: binop,
-                lhs: lhs,
-                rhs: rhs,
-            });
+            // TODO: Constant folding here
+
+            lhs = Box::new(ExprNode::BinaryOperation(binop, lhs, rhs));
         }
     }
 
-    fn parse_expression(&mut self) -> Result<Box<ExprAST>, ParseError> {
+    fn parse_expression(&mut self) -> Result<Box<ExprNode>, ParseError> {
         let lhs = self.parse_primary()?;
         self.parse_binop_rhs(0, lhs)
     }
@@ -407,7 +383,7 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    fn parse_if_expr(&mut self) -> Result<Box<ExprAST>, ParseError> {
+    fn parse_if_expr(&mut self) -> Result<Box<ExprNode>, ParseError> {
         self.get_next_token();
 
         let condition = self.parse_expression()?;
@@ -423,11 +399,46 @@ impl<'a> Parser<'a> {
         }
 
         let else_expr = self.parse_expression()?;
-        Ok(Box::new(IfElseAst {
-            condition: condition,
-            then_body: then_expr,
-            else_body: else_expr,
-        }))
+        Ok(Box::new(ExprNode::IfElse(condition, then_expr, else_expr)))
+    }
+
+    fn parse_for_expr(&mut self) -> Result<Box<ExprNode>, ParseError> {
+        self.get_next_token();
+        let id_name = match self.current_token {
+            Token::Identifier(ref name) => name.clone(),
+            _ => return Err(self.error("Expected for")),
+        };
+
+        self.get_next_token();
+        match self.current_token {
+            Token::Punctuation('=') => {}
+            _ => return Err(self.error("Expected for")),
+        };
+
+        self.get_next_token();
+        let start = self.parse_expression()?;
+        match self.current_token {
+            Token::Punctuation(',') => {}
+            _ => return Err(self.error("expected , after start value")),
+        };
+
+        self.get_next_token();
+        let end = self.parse_expression()?;
+
+        // Somehow the step is optional
+        let step = match self.current_token {
+            Token::Punctuation(',') => Some(self.parse_expression()?),
+            _ => None,
+        };
+
+        match self.current_token {
+            Token::In => {}
+            _ => return Err(self.error("expected 'in' after for")),
+        };
+
+        let body = self.parse_expression()?;
+
+        Ok(Box::new(ExprNode::ForLoop(start, end, step, body)))
     }
 
     fn parse_top_level_expr(&mut self) -> Result<Box<FunctionAST>, ParseError> {

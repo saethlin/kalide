@@ -9,6 +9,8 @@ pub enum Token {
     If,
     Then,
     Else,
+    For,
+    In,
     Identifier(String),
     Number(f64),
     Punctuation(char),
@@ -61,6 +63,8 @@ impl<'a> Lexer<'a> {
                     "if" => Token::If,
                     "then" => Token::Then,
                     "else" => Token::Else,
+                    "for" => Token::For,
+                    "in" => Token::In,
                     _ => Token::Identifier(self.buffer.clone()),
                 };
             // Numeric literal
