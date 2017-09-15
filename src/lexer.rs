@@ -1,4 +1,5 @@
 use std::str::Chars;
+use std::iter::Peekable;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -11,15 +12,17 @@ pub enum Token {
 }
 
 pub struct Lexer<'a> {
+    pub line: usize,
     buffer: String,
-    getchar: Chars<'a>,
+    getchar: Peekable<Chars<'a>>,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Lexer {
         Lexer {
+            line: 1,
             buffer: String::new(),
-            getchar: input.chars(),
+            getchar: input.chars().peekable(),
         }
     }
 
@@ -28,6 +31,9 @@ impl<'a> Lexer<'a> {
 
         while let Some(c) = self.getchar.next() {
             if c.is_whitespace() {
+                if c == '\n' {
+                    self.line += 1;
+                }
                 continue;
             }
             // Comments
@@ -38,9 +44,10 @@ impl<'a> Lexer<'a> {
             // Identifier
             if c.is_alphabetic() {
                 self.buffer.push(c);
-                while let Some(c) = self.getchar.next() {
+                while let Some(&c) = self.getchar.peek() {
                     if c.is_alphabetic() || c.is_numeric() {
                         self.buffer.push(c);
+                        self.getchar.next();
                     } else {
                         break;
                     }
@@ -53,9 +60,10 @@ impl<'a> Lexer<'a> {
             // Numeric literal
             } else if c.is_numeric() || c == '.' {
                 self.buffer.push(c);
-                while let Some(c) = self.getchar.next() {
+                while let Some(&c) = self.getchar.peek() {
                     if c.is_numeric() || c == '.' {
-                        self.buffer.push(c)
+                        self.buffer.push(c);
+                        self.getchar.next();
                     } else {
                         break;
                     }

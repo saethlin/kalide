@@ -9,7 +9,7 @@ use parser::Parser;
 fn main() {
     let tests = [
         "extern sin(a);",
-        "def foo(x y) x+foo(y, 4.0);",
+        "def foo(x y)\nx+foo(y, 4.0);",
         "def foo(x y) x+y; y;",
     ];
 

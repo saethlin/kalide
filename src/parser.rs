@@ -219,24 +219,24 @@ impl<'a> Parser<'a> {
 
     fn get_next_token(&mut self) -> Token {
         self.current_token = self.lexer.next_token();
+        println!("{:?}", self.current_token);
         self.current_token.clone()
     }
 
     fn parse_number_expr(&mut self) -> Result<Box<ExprAST>, ParseError> {
         println!("parse_number_expr");
         if let Token::Number(value) = self.current_token {
+            // Consume the number token
             self.get_next_token();
             Ok(Box::new(NumberExprAST { val: value }))
         } else {
-            Err(ParseError {
-                reason: format!("Not a number token: {:?}", self.current_token),
-            })
+            Err(self.error("Not a number token"))
         }
     }
 
     fn parse_paren_expr(&mut self) -> Result<Box<ExprAST>, ParseError> {
         println!("parse_paren_expr");
-        if let Token::Punctuation(_) = self.current_token {
+        if let Token::Punctuation('(') = self.current_token {
             // Eat the (
             // TODO: Both of these get_next_token need to match to ensure they are correct and return errors if not
             self.get_next_token();
@@ -245,9 +245,7 @@ impl<'a> Parser<'a> {
             self.get_next_token();
             v
         } else {
-            Err(ParseError {
-                reason: "Error parsing paren expression".to_owned(),
-            })
+            Err(self.error("Error parsing paren expression"))
         }
     }
 
@@ -257,12 +255,10 @@ impl<'a> Parser<'a> {
         println!("parse_identifier_expr");
         let id_name = match self.current_token {
             Token::Identifier(ref name) => name.clone(),
-            _ => {
-                return Err(ParseError {
-                    reason: "Expected valid identifier".to_owned(),
-                })
-            }
+            _ => return Err(self.error("Expected valid identifier")),
         };
+
+        // eat the identifier
         // simple variable ref
         if let Token::Punctuation(c) = self.get_next_token() {
             if c != '(' {
@@ -272,18 +268,25 @@ impl<'a> Parser<'a> {
             }
         }
 
-        println!("found call to function {:?}", id_name);
         self.get_next_token();
         let mut args = Vec::new();
         loop {
             if let Ok(arg) = self.parse_expression() {
-                args.push(arg)
-            } else if let Token::Punctuation(')') = self.current_token {
+                args.push(arg);
+            }
+
+            if let Token::Punctuation(')') = self.current_token {
                 break;
-            } else {
-                return Err(ParseError {
-                    reason: "Expected ) or , in argument list".to_owned(),
-                });
+            }
+
+            if let Token::Punctuation(c) = self.current_token {
+                if c != ',' {
+                    println!("token at failure: {:?}", self.current_token);
+                    return Err(self.error(&format!(
+                        "Expected ) or , in argument list. Found {:?}",
+                        self.current_token
+                    )));
+                }
             }
 
             self.get_next_token();
@@ -304,12 +307,7 @@ impl<'a> Parser<'a> {
             Token::Identifier(_) => self.parse_identifier_expr(),
             Token::Number(_) => self.parse_number_expr(),
             Token::Punctuation('(') => self.parse_paren_expr(),
-            _ => Err(ParseError {
-                reason: format!(
-                    "Unknown token when expecting an expression: {:?}",
-                    self.current_token
-                ),
-            }),
+            _ => Err(self.error("Unknown token when expecting an expression")),
         }
     }
 
@@ -366,7 +364,7 @@ impl<'a> Parser<'a> {
             self.get_next_token();
             if let Token::Punctuation(c) = self.current_token {
                 if c != '(' {
-                    return Err(ParseError { reason: "Expected ( in prototype".to_owned() });
+                    return Err(self.error("Expected ( in prototype"));
                 }
             }
 
@@ -377,7 +375,7 @@ impl<'a> Parser<'a> {
 
             if let Token::Punctuation(c) = self.current_token {
                 if c != ')' {
-                    return Err(ParseError { reason: "Expected ) in prototype".to_owned() });
+                    return Err(self.error("Expected ) in prototype"));
                 }
             }
             // eat the )
@@ -388,9 +386,7 @@ impl<'a> Parser<'a> {
                 args: argnames,
             }))
         } else {
-            Err(ParseError {
-                reason: "Expected identifier after def".to_owned(),
-            })
+            Err(self.error("Expected identifier after def"))
         }
     }
 
@@ -428,6 +424,10 @@ impl<'a> Parser<'a> {
         self.parse_prototype()
     }
 
+    fn error(&self, message: &str) -> ParseError {
+        ParseError { reason: format!("{} on line {}", message, self.lexer.line) }
+    }
+
     fn handle_definition(&mut self) {
         match self.parse_definition() {
             Ok(..) => {}
@@ -456,7 +456,7 @@ impl<'a> Parser<'a> {
         self.get_next_token();
         loop {
             match self.current_token {
-                Token::Punctuation(_) => {
+                Token::Punctuation(';') => {
                     self.get_next_token();
                 } // ignores line endings???
                 Token::EOF => return,
