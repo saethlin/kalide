@@ -34,6 +34,7 @@ impl fmt::Display for ParseError {
     }
 }
 
+#[derive(Debug)]
 enum ExprNode {
     Number(f64),
     Variable(CString),
@@ -324,9 +325,26 @@ impl<'a> Parser<'a> {
                 rhs = self.parse_binop_rhs(token_precedence + 1, rhs)?;
             }
 
-            // TODO: Constant folding here
-
-            lhs = Box::new(ExprNode::BinaryOperation(binop, lhs, rhs));
+            // Constant folding
+            println!("{:?}", lhs);
+            if let (ExprNode::Number(l), ExprNode::Number(r)) = (*lhs, *rhs) {
+                let value = match binop {
+                    '+' => l + r,
+                    '-' => l - r,
+                    '*' => l * r,
+                    '<' => {
+                        match (l < r) {
+                            true => 1.0,
+                            false => 0.0,
+                        }
+                    }
+                    _ => unreachable!("Unimplemented binary operation"),
+                };
+                lhs = Box::new(ExprNode::Number(value))
+            } else {
+                lhs = Box::new(ExprNode::BinaryOperation(binop, lhs, rhs));
+            };
+            println!("{:?}", lhs);
         }
     }
 

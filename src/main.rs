@@ -8,8 +8,8 @@ use parser::Parser;
 
 fn main() {
     let mut big_test = String::new();
-    for _ in 0..100000 {
-        big_test.extend("def foo(x, y)\nx+foo(y, 4.0);\n".chars());
+    for _ in 0..1 {
+        big_test.extend("def foo(x, y)\n1+2+3;\n".chars());
     }
 
     Parser::new(Lexer::new(&big_test)).run().unwrap();
