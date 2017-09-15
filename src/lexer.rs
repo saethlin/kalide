@@ -6,6 +6,9 @@ pub enum Token {
     EOF,
     Definition,
     Extern,
+    If,
+    Then,
+    Else,
     Identifier(String),
     Number(f64),
     Punctuation(char),
@@ -21,7 +24,7 @@ impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Lexer {
         Lexer {
             line: 1,
-            buffer: String::new(),
+            buffer: String::with_capacity(6),
             getchar: input.chars().peekable(),
         }
     }
@@ -55,6 +58,9 @@ impl<'a> Lexer<'a> {
                 return match self.buffer.as_str() {
                     "def" => Token::Definition,
                     "extern" => Token::Extern,
+                    "if" => Token::If,
+                    "then" => Token::Then,
+                    "else" => Token::Else,
                     _ => Token::Identifier(self.buffer.clone()),
                 };
             // Numeric literal

@@ -15,7 +15,7 @@ const LLVM_FALSE: LLVMBool = 0;
 const LLVM_TRUE: LLVMBool = 1;
 
 #[derive(Debug)]
-struct ParseError {
+pub struct ParseError {
     reason: String,
 }
 
@@ -176,10 +176,20 @@ impl<'a> FunctionAST<'a> {
     }
 }
 */
+
+struct IfElseAst {
+    condition: Box<ExprAST>,
+    then_body: Box<ExprAST>,
+    else_body: Box<ExprAST>,
+}
+impl ExprAST for IfElseAst {}
+
+
 pub struct Parser<'a> {
     precedence: HashMap<char, i64>,
     lexer: Lexer<'a>,
     current_token: Token,
+    output: String,
 
     // codegen stuff
     context: LLVMContextRef,
@@ -206,8 +216,9 @@ impl<'a> Parser<'a> {
                 context,
             );
             Parser {
-                precedence: precedence,
+                precedence: precedence, // TODO this is global _data_
                 lexer: lex,
+                output: String::new(),
                 current_token: Token::Identifier("".to_owned()),
                 context: context,
                 builder: builder,
@@ -219,12 +230,10 @@ impl<'a> Parser<'a> {
 
     fn get_next_token(&mut self) -> Token {
         self.current_token = self.lexer.next_token();
-        println!("{:?}", self.current_token);
         self.current_token.clone()
     }
 
     fn parse_number_expr(&mut self) -> Result<Box<ExprAST>, ParseError> {
-        println!("parse_number_expr");
         if let Token::Number(value) = self.current_token {
             // Consume the number token
             self.get_next_token();
@@ -235,7 +244,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_paren_expr(&mut self) -> Result<Box<ExprAST>, ParseError> {
-        println!("parse_paren_expr");
         if let Token::Punctuation('(') = self.current_token {
             // Eat the (
             // TODO: Both of these get_next_token need to match to ensure they are correct and return errors if not
@@ -252,7 +260,6 @@ impl<'a> Parser<'a> {
     // ::= identifier
     // ::= identifier '(' expression* ')'
     fn parse_identifier_expr(&mut self) -> Result<Box<ExprAST>, ParseError> {
-        println!("parse_identifier_expr");
         let id_name = match self.current_token {
             Token::Identifier(ref name) => name.clone(),
             _ => return Err(self.error("Expected valid identifier")),
@@ -281,7 +288,6 @@ impl<'a> Parser<'a> {
 
             if let Token::Punctuation(c) = self.current_token {
                 if c != ',' {
-                    println!("token at failure: {:?}", self.current_token);
                     return Err(self.error(&format!(
                         "Expected ) or , in argument list. Found {:?}",
                         self.current_token
@@ -302,20 +308,12 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_primary(&mut self) -> Result<Box<ExprAST>, ParseError> {
-        println!("parse_primary");
         match self.current_token {
-            Token::Identifier(_) => self.parse_identifier_expr(),
-            Token::Number(_) => self.parse_number_expr(),
+            Token::Identifier(..) => self.parse_identifier_expr(),
+            Token::Number(..) => self.parse_number_expr(),
             Token::Punctuation('(') => self.parse_paren_expr(),
+            Token::If => self.parse_if_expr(),
             _ => Err(self.error("Unknown token when expecting an expression")),
-        }
-    }
-
-    fn get_token_precedence(&mut self) -> i64 {
-        if let Token::Punctuation(c) = self.current_token {
-            *self.precedence.get(&c).unwrap_or(&-1)
-        } else {
-            unreachable!()
         }
     }
 
@@ -325,7 +323,6 @@ impl<'a> Parser<'a> {
         expression_precedence: i64,
         mut lhs: Box<ExprAST>,
     ) -> Result<Box<ExprAST>, ParseError> {
-        println!("parse_binop_rhs");
         loop {
             let binop = match self.current_token {
                 Token::Punctuation(op) => op,
@@ -339,7 +336,12 @@ impl<'a> Parser<'a> {
             self.get_next_token();
             let mut rhs = self.parse_primary()?;
 
-            let next_precedence = self.get_token_precedence();
+            let next_precedence = if let Token::Punctuation(c) = self.current_token {
+                *self.precedence.get(&c).unwrap_or(&-1)
+            } else {
+                unreachable!()
+            };
+
             if token_precedence < next_precedence {
                 rhs = self.parse_binop_rhs(token_precedence + 1, rhs)?;
             }
@@ -353,24 +355,27 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expression(&mut self) -> Result<Box<ExprAST>, ParseError> {
-        println!("parse_expression");
         let lhs = self.parse_primary()?;
         self.parse_binop_rhs(0, lhs)
     }
 
     fn parse_prototype(&mut self) -> Result<Box<PrototypeAST>, ParseError> {
-        println!("parse prototype");
         if let Token::Identifier(function_name) = self.current_token.clone() {
-            self.get_next_token();
-            if let Token::Punctuation(c) = self.current_token {
+            if let Token::Punctuation(c) = self.get_next_token() {
                 if c != '(' {
                     return Err(self.error("Expected ( in prototype"));
                 }
             }
 
             let mut argnames = Vec::new();
-            while let Token::Identifier(id) = self.get_next_token() {
+            self.get_next_token();
+            while let Token::Identifier(id) = self.current_token.clone() {
                 argnames.push(CString::new(id.as_bytes()).unwrap());
+                self.get_next_token();
+                if let Token::Punctuation(',') = self.current_token {
+                    self.get_next_token();
+                }
+
             }
 
             if let Token::Punctuation(c) = self.current_token {
@@ -391,7 +396,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_definition(&mut self) -> Result<Box<FunctionAST>, ParseError> {
-        println!("parse_definition");
         // Eat the def
         self.get_next_token();
         let proto = self.parse_prototype()?;
@@ -403,8 +407,30 @@ impl<'a> Parser<'a> {
         }))
     }
 
+    fn parse_if_expr(&mut self) -> Result<Box<ExprAST>, ParseError> {
+        self.get_next_token();
+
+        let condition = self.parse_expression()?;
+        match self.current_token {
+            Token::Then => {}
+            _ => return Err(self.error("Expected then")),
+        }
+
+        let then_expr = self.parse_expression()?;
+        match self.current_token {
+            Token::Else => {}
+            _ => return Err(self.error("Expected else")),
+        }
+
+        let else_expr = self.parse_expression()?;
+        Ok(Box::new(IfElseAst {
+            condition: condition,
+            then_body: then_expr,
+            else_body: else_expr,
+        }))
+    }
+
     fn parse_top_level_expr(&mut self) -> Result<Box<FunctionAST>, ParseError> {
-        println!("parse_top_level_expr");
         let body = self.parse_expression()?;
         let proto = Box::new(PrototypeAST {
             name: CStr::from_bytes_with_nul(b"__anon_expr\0")
@@ -431,39 +457,37 @@ impl<'a> Parser<'a> {
     fn handle_definition(&mut self) {
         match self.parse_definition() {
             Ok(..) => {}
-            Err(e) => println!("{}", e),
+            Err(e) => self.output.push_str(&format!("{}\n", e)),
         };
-        println!("Parsed function definition");
     }
 
     fn handle_extern(&mut self) {
         match self.parse_extern() {
             Ok(..) => {}
-            Err(e) => println!("{}", e),
+            Err(e) => self.output.push_str(&format!("{}\n", e)),
         };
-        println!("Parsed extern");
     }
 
     fn handle_top_level_expression(&mut self) {
         match self.parse_top_level_expr() {
             Ok(..) => {}
-            Err(e) => println!("{}", e),
+            Err(e) => self.output.push_str(&format!("{}\n", e)),
         };
-        println!("Parsed top-level expression");
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> Result<(), ParseError> {
         self.get_next_token();
         loop {
             match self.current_token {
                 Token::Punctuation(';') => {
                     self.get_next_token();
                 } // ignores line endings???
-                Token::EOF => return,
+                Token::EOF => return Ok(()),
                 Token::Definition => self.handle_definition(),
                 Token::Extern => self.handle_extern(),
                 _ => self.handle_top_level_expression(),
             }
         }
+        print!("{}", self.output);
     }
 }
