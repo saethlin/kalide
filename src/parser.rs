@@ -1,3 +1,8 @@
+// TODO: Remove Parser::current_token. I'm certain we can avoid this by just passing tokens to some of the parsing functions
+// TODO: Remove all the unreachable!() and handle missing semicolons
+// TODO: codegen
+// TODO: output
+
 #![allow(unused)]
 use std::collections::HashMap;
 use std::error::Error;
@@ -44,11 +49,13 @@ enum ExprNode {
     ForLoop(Box<ExprNode>, Box<ExprNode>, Option<Box<ExprNode>>, Box<ExprNode>),
 }
 
+#[derive(Debug)]
 struct Prototype {
     name: CString,
     args: Vec<CString>,
 }
 
+#[derive(Debug)]
 struct Function {
     proto: Box<Prototype>,
     body: Box<ExprNode>,
@@ -181,7 +188,7 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     pub fn new(lex: Lexer<'a>) -> Self {
         unsafe {
-            let mut precedence = HashMap::new();
+            let mut precedence = HashMap::with_capacity(4);
             precedence.insert('<', 10);
             precedence.insert('+', 20);
             precedence.insert('-', 20);
@@ -227,6 +234,7 @@ impl<'a> Parser<'a> {
             // Eat the (
             // TODO: Both of these get_next_token need to match to ensure they are correct and return errors if not
             self.get_next_token();
+
             let v = self.parse_expression();
             // Eat the )
             self.get_next_token();
@@ -326,25 +334,27 @@ impl<'a> Parser<'a> {
             }
 
             // Constant folding
-            println!("{:?}", lhs);
-            if let (ExprNode::Number(l), ExprNode::Number(r)) = (*lhs, *rhs) {
-                let value = match binop {
-                    '+' => l + r,
-                    '-' => l - r,
-                    '*' => l * r,
-                    '<' => {
-                        match (l < r) {
-                            true => 1.0,
-                            false => 0.0,
+            lhs = if let ExprNode::Number(l) = *lhs {
+                if let ExprNode::Number(r) = *rhs {
+                    let value = match binop {
+                        '+' => l + r,
+                        '-' => l - r,
+                        '*' => l * r,
+                        '<' => {
+                            match l < r {
+                                true => 1.0,
+                                false => 0.0,
+                            }
                         }
-                    }
-                    _ => unreachable!("Unimplemented binary operation"),
-                };
-                lhs = Box::new(ExprNode::Number(value))
+                        _ => unreachable!("Unimplemented binary operation"),
+                    };
+                    Box::new(ExprNode::Number(value))
+                } else {
+                    Box::new(ExprNode::BinaryOperation(binop, lhs, rhs))
+                }
             } else {
-                lhs = Box::new(ExprNode::BinaryOperation(binop, lhs, rhs));
+                Box::new(ExprNode::BinaryOperation(binop, lhs, rhs))
             };
-            println!("{:?}", lhs);
         }
     }
 
@@ -485,7 +495,7 @@ impl<'a> Parser<'a> {
 
     fn handle_definition(&mut self) {
         match self.parse_definition() {
-            Ok(..) => {}
+            Ok(def) => println!("{:#?}", def),
             Err(e) => self.output.push_str(&format!("{}\n", e)),
         };
     }
