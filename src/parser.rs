@@ -1,23 +1,13 @@
-// TODO: Remove Parser::current_token. I'm certain we can avoid this by just passing tokens to some of the parsing functions
 // TODO: Remove all the unreachable!() and handle missing semicolons
 // TODO: codegen
-// TODO: output
+// TODO: print function
 
 #![allow(unused)]
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use lexer::{Lexer, Token};
-
-use llvm_sys::LLVMRealPredicate;
-use llvm_sys::core::*;
-use llvm_sys::prelude::*;
-
-use std::rc::Rc;
-use std::ffi::{CString, CStr};
-
-const LLVM_FALSE: LLVMBool = 0;
-const LLVM_TRUE: LLVMBool = 1;
+use smallvec::SmallVec;
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -40,19 +30,34 @@ impl fmt::Display for ParseError {
 }
 
 #[derive(Debug)]
-enum ExprNode {
+pub enum ExprNode {
     Number(f64),
-    Variable(CString),
+    Variable(String),
     BinaryOperation(char, Box<ExprNode>, Box<ExprNode>),
-    FunctionCall(CString, Vec<Box<ExprNode>>),
+    FunctionCall(String, Vec<Box<ExprNode>>),
     IfElse(Box<ExprNode>, Box<ExprNode>, Box<ExprNode>),
-    ForLoop(Box<ExprNode>, Box<ExprNode>, Option<Box<ExprNode>>, Box<ExprNode>),
+    ForLoop(
+        Box<ExprNode>,
+        Box<ExprNode>,
+        Option<Box<ExprNode>>,
+        Box<ExprNode>,
+    ),
 }
+
+impl ExprNode {
+    pub fn codegen(&self, code: &mut String) {
+        match *self {
+            ExprNode::Number(value) => {}
+            _ => {}
+        }
+    }
+}
+
 
 #[derive(Debug)]
 struct Prototype {
-    name: CString,
-    args: Vec<CString>,
+    name: String,
+    args: SmallVec<[String; 8]>,
 }
 
 #[derive(Debug)]
@@ -61,162 +66,36 @@ struct Function {
     body: Box<ExprNode>,
 }
 
-/*
-impl ExprAST for NumberExprAST {
-    fn codegen(&self) -> LLVMValueRef {
-        LLVMConstReal(LLVMDoubleType(), self.val)
-    }
-}
-*/
-/*
-impl<'a> ExprAST for VariableExprAST<'a> {
-    fn codegen(&self) -> LLVMValueRef {
-        *self.parser.names.get(&self.name).unwrap()
-    }
-}
-*/
-/*
-impl<'a> ExprAST for BinaryExprAST<'a> {
-    fn codegen(&self) -> LLVMValueRef {
-        let l = self.lhs.codegen();
-        let r = self.rhs.codegen();
-
-        match self.op {
-            '+' => {
-                LLVMBuildFAdd(
-                    self.parser.builder,
-                    l,
-                    r,
-                    CStr::from_bytes_with_nul(b"addtmp\0").unwrap().as_ptr(),
-                )
-            }
-            '-' => {
-                LLVMBuildFSub(
-                    self.parser.builder,
-                    l,
-                    r,
-                    CStr::from_bytes_with_nul_unchecked(b"subtmp\0").as_ptr(),
-                )
-            }
-            '*' => {
-                LLVMBuildFMul(
-                    self.parser.builder,
-                    l,
-                    r,
-                    CStr::from_bytes_with_nul_unchecked(b"multmp\0").as_ptr(),
-                )
-            }
-            '<' => {
-                // Convert to boolean here apparently?
-                LLVMBuildFCmp(
-                    self.parser.builder,
-                    LLVMRealPredicate::LLVMRealORD,
-                    l,
-                    r,
-                    CStr::from_bytes_with_nul_unchecked(b"cmptmp\0").as_ptr(),
-                )
-            }
-            _ => unreachable!(),            
-        }
-    }
-}
-*/
-/*
-impl<'a> ExprAST for CallExprAST<'a> {
-    fn codegen(&self) -> LLVMValueRef {
-        let llvm_callee = LLVMGetNamedFunction(self.parser.module, self.callee.as_ptr());
-        // use LLVMFunctionType to validate the function
-
-        let llvm_args: Vec<_> = self.args.iter().map(|arg| arg.codegen()).collect();
-        LLVMBuildCall(
-            self.parser.builder,
-            llvm_callee,
-            llvm_args.as_mut_ptr(),
-            llvm_args.len() as u32,
-            self.callee.as_ptr(),
-        )
-    }
-}
-*/
-/*
-impl<'a> ExprAST for Prototype<'a> {
-    fn codegen(&self) -> LLVMValueRef {
-        let arg_types: Vec<_> = self.args
-            .iter()
-            .map(|_| LLVMDoubleTypeInContext(self.parser.context))
-            .collect();
-        let fn_type = LLVMFunctionType(
-            LLVMDoubleTypeInContext(self.parser.context),
-            arg_types.as_mut_ptr(),
-            arg_types.len() as u32,
-            LLVM_FALSE,
-        );
-        LLVMAddFunction(self.parser.module, self.name.as_ptr(), fn_type)
-    }
-}
-*/
-/*
-impl<'a> Function<'a> {
-    fn codegen(&mut self) {
-        let the_function = LLVMGetNamedFunction(self.parser.module, self.proto.name.as_ptr());
-        let basic_block = LLVMGetInsertBlock(self.parser.builder);
-        LLVMInsertIntoBuilderWithName(
-            self.parser.builder,
-            LLVMBasicBlockAsValue(basic_block),
-            CStr::from_bytes_with_nul_unchecked(b"entry\0").as_ptr(),
-        );
-        self.parser.names.clear();
-
-    }
-}
-*/
-
 pub struct Parser<'a> {
-    precedence: HashMap<char, i64>,
+    nodes: SmallVec<[ExprNode; 8]>,
     lexer: Lexer<'a>,
     current_token: Token,
     output: String,
-
-    // codegen stuff
-    context: LLVMContextRef,
-    builder: LLVMBuilderRef,
-    module: LLVMModuleRef,
-    names: HashMap<CString, LLVMValueRef>,
 }
 
 
+fn precedence(c: char) -> i64 {
+    match c {
+        '<' => 10,
+        '+' => 20,
+        '-' => 20,
+        '*' => 40,
+        _ => -1,
+    }
+}
+
 impl<'a> Parser<'a> {
     pub fn new(lex: Lexer<'a>) -> Self {
-        unsafe {
-            let mut precedence = HashMap::with_capacity(4);
-            precedence.insert('<', 10);
-            precedence.insert('+', 20);
-            precedence.insert('-', 20);
-            precedence.insert('*', 40);
-            let context = LLVMContextCreate();
-            let builder = LLVMCreateBuilderInContext(context);
-            let module = LLVMModuleCreateWithNameInContext(
-                CStr::from_bytes_with_nul(b"Kalide Compiler\0")
-                    .unwrap()
-                    .as_ptr(),
-                context,
-            );
-            Parser {
-                precedence: precedence, // TODO this is global _data_
-                lexer: lex,
-                output: String::new(),
-                current_token: Token::Identifier("".to_owned()),
-                context: context,
-                builder: builder,
-                module: module,
-                names: HashMap::new(),
-            }
+        Parser {
+            nodes: SmallVec::new(),
+            lexer: lex,
+            current_token: Token::Identifier(String::new()),
+            output: String::new(),
         }
     }
 
-    fn get_next_token(&mut self) -> Token {
+    fn get_next_token(&mut self) {
         self.current_token = self.lexer.next_token();
-        self.current_token.clone()
     }
 
     fn parse_number_expr(&mut self) -> Result<Box<ExprNode>, ParseError> {
@@ -232,20 +111,19 @@ impl<'a> Parser<'a> {
     fn parse_paren_expr(&mut self) -> Result<Box<ExprNode>, ParseError> {
         if let Token::Punctuation('(') = self.current_token {
             // Eat the (
-            // TODO: Both of these get_next_token need to match to ensure they are correct and return errors if not
+            // TODO: Both of these get_next_token need to match
+            // to ensure they are correct and return errors if not
             self.get_next_token();
 
-            let v = self.parse_expression();
+            let expr = self.parse_expression();
             // Eat the )
             self.get_next_token();
-            v
+            expr
         } else {
             Err(self.error("Error parsing paren expression"))
         }
     }
 
-    // ::= identifier
-    // ::= identifier '(' expression* ')'
     fn parse_identifier_expr(&mut self) -> Result<Box<ExprNode>, ParseError> {
         let id_name = match self.current_token {
             Token::Identifier(ref name) => name.clone(),
@@ -254,11 +132,10 @@ impl<'a> Parser<'a> {
 
         // eat the identifier
         // simple variable ref
-        if let Token::Punctuation(c) = self.get_next_token() {
+        self.get_next_token();
+        if let Token::Punctuation(c) = self.current_token {
             if c != '(' {
-                return Ok(Box::new(ExprNode::Variable(
-                    CString::new(id_name.as_bytes()).unwrap(),
-                )));
+                return Ok(Box::new(ExprNode::Variable(id_name)));
             }
         }
 
@@ -288,10 +165,7 @@ impl<'a> Parser<'a> {
         // Eat the )
         self.get_next_token();
 
-        Ok(Box::new(ExprNode::FunctionCall(
-            CString::new(id_name.as_bytes()).unwrap(),
-            args,
-        )))
+        Ok(Box::new(ExprNode::FunctionCall(id_name, args)))
     }
 
     fn parse_primary(&mut self) -> Result<Box<ExprNode>, ParseError> {
@@ -300,6 +174,7 @@ impl<'a> Parser<'a> {
             Token::Number(..) => self.parse_number_expr(),
             Token::Punctuation('(') => self.parse_paren_expr(),
             Token::If => self.parse_if_expr(),
+            Token::For => self.parse_for_expr(),
             _ => Err(self.error("Unknown token when expecting an expression")),
         }
     }
@@ -315,7 +190,7 @@ impl<'a> Parser<'a> {
                 Token::Punctuation(op) => op,
                 _ => unreachable!(),
             };
-            let token_precedence = *self.precedence.get(&binop).unwrap_or(&-1);
+            let token_precedence = precedence(binop);
             if token_precedence < expression_precedence {
                 return Ok(lhs);
             }
@@ -324,7 +199,7 @@ impl<'a> Parser<'a> {
             let mut rhs = self.parse_primary()?;
 
             let next_precedence = if let Token::Punctuation(c) = self.current_token {
-                *self.precedence.get(&c).unwrap_or(&-1)
+                precedence(c)
             } else {
                 unreachable!()
             };
@@ -340,12 +215,10 @@ impl<'a> Parser<'a> {
                         '+' => l + r,
                         '-' => l - r,
                         '*' => l * r,
-                        '<' => {
-                            match l < r {
-                                true => 1.0,
-                                false => 0.0,
-                            }
-                        }
+                        '<' => match l < r {
+                            true => 1.0,
+                            false => 0.0,
+                        },
                         _ => unreachable!("Unimplemented binary operation"),
                     };
                     Box::new(ExprNode::Number(value))
@@ -365,21 +238,21 @@ impl<'a> Parser<'a> {
 
     fn parse_prototype(&mut self) -> Result<Box<Prototype>, ParseError> {
         if let Token::Identifier(function_name) = self.current_token.clone() {
-            if let Token::Punctuation(c) = self.get_next_token() {
+            self.get_next_token();
+            if let Token::Punctuation(c) = self.current_token {
                 if c != '(' {
                     return Err(self.error("Expected ( in prototype"));
                 }
             }
 
-            let mut argnames = Vec::new();
+            let mut argnames = SmallVec::new();
             self.get_next_token();
             while let Token::Identifier(id) = self.current_token.clone() {
-                argnames.push(CString::new(id.as_bytes()).unwrap());
+                argnames.push(id);
                 self.get_next_token();
                 if let Token::Punctuation(',') = self.current_token {
                     self.get_next_token();
                 }
-
             }
 
             if let Token::Punctuation(c) = self.current_token {
@@ -391,7 +264,7 @@ impl<'a> Parser<'a> {
             self.get_next_token();
 
             Ok(Box::new(Prototype {
-                name: CString::new(function_name.as_bytes()).unwrap(),
+                name: function_name,
                 args: argnames,
             }))
         } else {
@@ -431,18 +304,21 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_for_expr(&mut self) -> Result<Box<ExprNode>, ParseError> {
+        println!("Parsing loop");
         self.get_next_token();
         let id_name = match self.current_token {
             Token::Identifier(ref name) => name.clone(),
-            _ => return Err(self.error("Expected for")),
+            _ => return Err(self.error("Expected identifier after for")),
         };
 
+        println!("Parsing =");
         self.get_next_token();
         match self.current_token {
             Token::Punctuation('=') => {}
-            _ => return Err(self.error("Expected for")),
+            _ => return Err(self.error("Expected = after for")),
         };
 
+        println!("Parsing start");
         self.get_next_token();
         let start = self.parse_expression()?;
         match self.current_token {
@@ -450,15 +326,18 @@ impl<'a> Parser<'a> {
             _ => return Err(self.error("expected , after start value")),
         };
 
+        println!("Parsing end");
         self.get_next_token();
         let end = self.parse_expression()?;
 
+        println!("Parsing step");
         // Somehow the step is optional
         let step = match self.current_token {
             Token::Punctuation(',') => Some(self.parse_expression()?),
             _ => None,
         };
 
+        println!("Parsing in");
         match self.current_token {
             Token::In => {}
             _ => return Err(self.error("expected 'in' after for")),
@@ -472,10 +351,8 @@ impl<'a> Parser<'a> {
     fn parse_top_level_expr(&mut self) -> Result<Box<Function>, ParseError> {
         let body = self.parse_expression()?;
         let proto = Box::new(Prototype {
-            name: CStr::from_bytes_with_nul(b"__anon_expr\0")
-                .unwrap()
-                .to_owned(),
-            args: Vec::new(),
+            name: String::from("__anon_expr"),
+            args: SmallVec::new(),
         });
         Ok(Box::new(Function {
             proto: proto,
@@ -490,12 +367,14 @@ impl<'a> Parser<'a> {
     }
 
     fn error(&self, message: &str) -> ParseError {
-        ParseError { reason: format!("{} on line {}", message, self.lexer.line) }
+        ParseError {
+            reason: format!("{} on line {}", message, self.lexer.line),
+        }
     }
 
     fn handle_definition(&mut self) {
         match self.parse_definition() {
-            Ok(def) => println!("{:#?}", def),
+            Ok(def) => {}
             Err(e) => self.output.push_str(&format!("{}\n", e)),
         };
     }
@@ -520,7 +399,8 @@ impl<'a> Parser<'a> {
             match self.current_token {
                 Token::Punctuation(';') => {
                     self.get_next_token();
-                } // ignores line endings???
+                }
+                // ignores line endings???
                 Token::EOF => return Ok(()),
                 Token::Definition => self.handle_definition(),
                 Token::Extern => self.handle_extern(),

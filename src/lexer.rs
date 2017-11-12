@@ -26,7 +26,7 @@ impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Lexer {
         Lexer {
             line: 1,
-            buffer: String::with_capacity(6),
+            buffer: String::with_capacity(4),
             getchar: input.chars().peekable(),
         }
     }
@@ -57,7 +57,7 @@ impl<'a> Lexer<'a> {
                         break;
                     }
                 }
-                return match self.buffer.as_str() {
+                return match self.buffer.as_ref() {
                     "def" => Token::Definition,
                     "extern" => Token::Extern,
                     "if" => Token::If,

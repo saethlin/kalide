@@ -4,4 +4,8 @@ version = "0.1.0"
 authors = ["Ben"]
 
 [dependencies]
-llvm-sys = "50"
+smallvec = "0.5.0"
+bencher = "0.1.4"
+
+[profile.release]
+debug = true
