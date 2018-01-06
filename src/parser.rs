@@ -1,13 +1,12 @@
 // TODO: Remove all the unreachable!() and handle missing semicolons
 // TODO: codegen
 // TODO: print function
+// TODO: assignment
+// TODO: memory allocation
 
-#![allow(unused)]
-use std::collections::HashMap;
+use lexer::{Lexer, Token};
 use std::error::Error;
 use std::fmt;
-use lexer::{Lexer, Token};
-use smallvec::SmallVec;
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -42,6 +41,7 @@ pub enum ExprNode {
         Option<Box<ExprNode>>,
         Box<ExprNode>,
     ),
+    Assignment(String, 
 }
 
 impl ExprNode {
@@ -53,21 +53,21 @@ impl ExprNode {
     }
 }
 
-
 #[derive(Debug)]
 struct Prototype {
     name: String,
-    args: SmallVec<[String; 8]>,
+    arguments: Vec<(String, Type)>,
+    return_type: Type,
 }
 
 #[derive(Debug)]
 struct Function {
-    proto: Box<Prototype>,
-    body: Box<ExprNode>,
+    prot: Prototype,
+    body: Vec<Box<ExprNode>>,
 }
 
 pub struct Parser<'a> {
-    nodes: SmallVec<[ExprNode; 8]>,
+    top_level_functions: Vec<Function>,
     lexer: Lexer<'a>,
     current_token: Token,
     output: String,
@@ -76,10 +76,9 @@ pub struct Parser<'a> {
 
 fn precedence(c: char) -> i64 {
     match c {
-        '<' => 10,
-        '+' => 20,
-        '-' => 20,
-        '*' => 40,
+        '<' | '>' => 10,
+        '+' | '-' => 20,
+        '*' | '/' => 40,
         _ => -1,
     }
 }
@@ -87,9 +86,9 @@ fn precedence(c: char) -> i64 {
 impl<'a> Parser<'a> {
     pub fn new(lex: Lexer<'a>) -> Self {
         Parser {
-            nodes: SmallVec::new(),
+            top_level_functions: Vec::new(),
             lexer: lex,
-            current_token: Token::Identifier(String::new()),
+            current_token: Token::EOL,
             output: String::new(),
         }
     }
@@ -109,7 +108,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_paren_expr(&mut self) -> Result<Box<ExprNode>, ParseError> {
-        if let Token::Punctuation('(') = self.current_token {
+        if let Token::OpenParen = self.current_token {
             // Eat the (
             // TODO: Both of these get_next_token need to match
             // to ensure they are correct and return errors if not
@@ -130,13 +129,12 @@ impl<'a> Parser<'a> {
             _ => return Err(self.error("Expected valid identifier")),
         };
 
-        // eat the identifier
-        // simple variable ref
+        // We could have encountered a function call or just a variable access.
+        // First we check for a simple variable access
         self.get_next_token();
-        if let Token::Punctuation(c) = self.current_token {
-            if c != '(' {
-                return Ok(Box::new(ExprNode::Variable(id_name)));
-            }
+        match self.current_token {
+            Token::OpenParen => {}, // Continue on if this is a function call
+            _ => return Ok(Box::new(ExprNode::Variable(id_name))),
         }
 
         self.get_next_token();
@@ -146,17 +144,10 @@ impl<'a> Parser<'a> {
                 args.push(arg);
             }
 
-            if let Token::Punctuation(')') = self.current_token {
-                break;
-            }
-
-            if let Token::Punctuation(c) = self.current_token {
-                if c != ',' {
-                    return Err(self.error(&format!(
-                        "Expected ) or , in argument list. Found {:?}",
-                        self.current_token
-                    )));
-                }
+            match self.current_token {
+                Token::Comma => {},
+                Token::CloseParen => break,
+                _ => return Err(self.error("Expected ) or , in argument list")),
             }
 
             self.get_next_token();
@@ -172,7 +163,7 @@ impl<'a> Parser<'a> {
         match self.current_token {
             Token::Identifier(..) => self.parse_identifier_expr(),
             Token::Number(..) => self.parse_number_expr(),
-            Token::Punctuation('(') => self.parse_paren_expr(),
+            Token::OpenParen => self.parse_paren_expr(),
             Token::If => self.parse_if_expr(),
             Token::For => self.parse_for_expr(),
             _ => Err(self.error("Unknown token when expecting an expression")),
@@ -187,7 +178,7 @@ impl<'a> Parser<'a> {
     ) -> Result<Box<ExprNode>, ParseError> {
         loop {
             let binop = match self.current_token {
-                Token::Punctuation(op) => op,
+                Token::Operator(op) => op,
                 _ => unreachable!(),
             };
             let token_precedence = precedence(binop);
@@ -198,7 +189,7 @@ impl<'a> Parser<'a> {
             self.get_next_token();
             let mut rhs = self.parse_primary()?;
 
-            let next_precedence = if let Token::Punctuation(c) = self.current_token {
+            let next_precedence = if let Token::Operator(c) = self.current_token {
                 precedence(c)
             } else {
                 unreachable!()
@@ -215,9 +206,10 @@ impl<'a> Parser<'a> {
                         '+' => l + r,
                         '-' => l - r,
                         '*' => l * r,
-                        '<' => match l < r {
-                            true => 1.0,
-                            false => 0.0,
+                        '<' => if l < r {
+                            1.0
+                        } else {
+                            0.0
                         },
                         _ => unreachable!("Unimplemented binary operation"),
                     };
@@ -239,26 +231,24 @@ impl<'a> Parser<'a> {
     fn parse_prototype(&mut self) -> Result<Box<Prototype>, ParseError> {
         if let Token::Identifier(function_name) = self.current_token.clone() {
             self.get_next_token();
-            if let Token::Punctuation(c) = self.current_token {
-                if c != '(' {
-                    return Err(self.error("Expected ( in prototype"));
-                }
+            match self.current_token {
+                Token::OpenParen => {},
+                _ => return Err(self.error("Expected ( in prototype")),
             }
 
-            let mut argnames = SmallVec::new();
+            let mut argnames = Vec::new();
             self.get_next_token();
             while let Token::Identifier(id) = self.current_token.clone() {
                 argnames.push(id);
                 self.get_next_token();
-                if let Token::Punctuation(',') = self.current_token {
+                if let Token::Comma = self.current_token {
                     self.get_next_token();
                 }
             }
 
-            if let Token::Punctuation(c) = self.current_token {
-                if c != ')' {
-                    return Err(self.error("Expected ) in prototype"));
-                }
+            match self.current_token {
+                Token::CloseParen => {},
+                _ => return Err(self.error("Espected ) in prototype")),
             }
             // eat the )
             self.get_next_token();
@@ -314,7 +304,7 @@ impl<'a> Parser<'a> {
         println!("Parsing =");
         self.get_next_token();
         match self.current_token {
-            Token::Punctuation('=') => {}
+            Token::Equals => {}
             _ => return Err(self.error("Expected = after for")),
         };
 
@@ -322,7 +312,7 @@ impl<'a> Parser<'a> {
         self.get_next_token();
         let start = self.parse_expression()?;
         match self.current_token {
-            Token::Punctuation(',') => {}
+            Token::Comma => {}
             _ => return Err(self.error("expected , after start value")),
         };
 
@@ -333,7 +323,7 @@ impl<'a> Parser<'a> {
         println!("Parsing step");
         // Somehow the step is optional
         let step = match self.current_token {
-            Token::Punctuation(',') => Some(self.parse_expression()?),
+            Token::Comma => Some(self.parse_expression()?),
             _ => None,
         };
 
@@ -352,7 +342,7 @@ impl<'a> Parser<'a> {
         let body = self.parse_expression()?;
         let proto = Box::new(Prototype {
             name: String::from("__anon_expr"),
-            args: SmallVec::new(),
+            args: Vec::new(),
         });
         Ok(Box::new(Function {
             proto: proto,
@@ -393,18 +383,18 @@ impl<'a> Parser<'a> {
         };
     }
 
-    pub fn run(&mut self) -> Result<(), ParseError> {
+    // Find every top-level function definition, launch a new parser for each one
+    pub fn run(&mut self) -> Result<Vec<ExprNode>, ParseError> {
+        // Need to prime the lexer
         self.get_next_token();
         loop {
             match self.current_token {
-                Token::Punctuation(';') => {
-                    self.get_next_token();
-                }
-                // ignores line endings???
-                Token::EOF => return Ok(()),
-                Token::Definition => self.handle_definition(),
-                Token::Extern => self.handle_extern(),
-                _ => self.handle_top_level_expression(),
+                Token::EOL => self.get_next_token(),
+                Token::EOF => break,
+                Token::Definition => {
+                    toplevel_symbols.push(self.parse_prototype());
+                    
+                },
             }
         }
         print!("{}", self.output);

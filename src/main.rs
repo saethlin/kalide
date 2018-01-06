@@ -1,6 +1,5 @@
 #[macro_use]
 extern crate bencher;
-extern crate smallvec;
 
 use bencher::Bencher;
 
@@ -10,17 +9,9 @@ use lexer::Lexer;
 mod parser;
 use parser::Parser;
 
-fn parse_extern(bench: &mut Bencher) {
-    bench.iter(|| Parser::new(Lexer::new("extern sin(a);")).run().unwrap())
-}
-
-fn parse_prototype(bench: &mut Bencher) {
-    bench.iter(|| Parser::new(Lexer::new("def foo(x, y);")).run().unwrap())
-}
-
 fn parse_function(bench: &mut Bencher) {
     bench.iter(|| {
-        Parser::new(Lexer::new("def foo(x, y) x+y;")).run().unwrap()
+        Parser::new(Lexer::new("def foo(x, y) {x+y;}")).run().unwrap()
     })
 }
 
@@ -34,7 +25,7 @@ fn parse_binop(bench: &mut Bencher) {
 
 fn lex_function(bench: &mut Bencher) {
     bench.iter(|| {
-        let mut lex = Lexer::new("def foo(x, y) x+y;");
+        let mut lex = Lexer::new("def foo(x, y) {x+y;}");
         while lex.next_token() != lexer::Token::EOF {}
     })
 }
@@ -57,22 +48,12 @@ printstar(100);",
 
 benchmark_group!(
     benches,
-    parse_extern,
-    parse_prototype,
     parse_function,
     parse_number,
     lex_function,
     parse_binop
 );
 benchmark_main!(benches);
-
-/*
-fn main() {
-    for _ in 0..10_000 {
-        Parser::new(Lexer::new("def foo(x, y) x+y;")).run().unwrap();
-    }
-}
-*/
 
 /*
 With smallvec, nodes allocated in a vector

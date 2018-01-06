@@ -1,11 +1,10 @@
-use std::str::Chars;
 use std::iter::Peekable;
+use std::str::Chars;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     EOF,
     Definition,
-    Extern,
     If,
     Then,
     Else,
@@ -13,7 +12,15 @@ pub enum Token {
     In,
     Identifier(String),
     Number(f64),
-    Punctuation(char),
+    Operator(char),
+    EOL,
+    OpenParen,
+    CloseParen,
+    OpenBrace,
+    CloseBrace,
+    Colon,
+    Comma,
+    Equals,
 }
 
 pub struct Lexer<'a> {
@@ -59,7 +66,6 @@ impl<'a> Lexer<'a> {
                 }
                 return match self.buffer.as_ref() {
                     "def" => Token::Definition,
-                    "extern" => Token::Extern,
                     "if" => Token::If,
                     "then" => Token::Then,
                     "else" => Token::Else,
@@ -83,7 +89,23 @@ impl<'a> Lexer<'a> {
                     Err(..) => panic!("Invalid numeric literal {}", self.buffer),
                 };
             } else {
-                return Token::Punctuation(c);
+                return match c {
+                    '(' => Token::OpenParen,
+                    ')' => Token::CloseParen,
+                    ';' => Token::EOL,
+                    '{' => Token::OpenBrace,
+                    '}' => Token::CloseBrace,
+                    ':' => Token::Colon,
+                    ',' => Token::Comma,
+                    '=' => Token::Equals,
+                    '>' => Token::Operator('>'),
+                    '<' => Token::Operator('<'),
+                    '+' => Token::Operator('+'),
+                    '-' => Token::Operator('-'),
+                    '*' => Token::Operator('*'),
+                    '/' => Token::Operator('/'),
+                    _ => unreachable!(&format!("Encountered unknown symbol {}", c)),
+                };
             }
         }
         Token::EOF
